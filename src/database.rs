@@ -16,6 +16,7 @@
 //! ```
 //! 
 
+use chrono::{DateTime, Utc};
 use libsql::{params, Builder, Connection, Transaction};
 
 pub struct Database;
@@ -27,16 +28,17 @@ impl Database {
         let conn = db.connect()?;
 
         conn.execute("CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                uuid TEXT UNIQUE NOT NULL,
-                serial_number TEXT UNIQUE NOT NULL,
-                device_name TEXT,
-                device_owner TEXT,
-                email TEXT UNIQUE NOT NULL,
-                password TEXT
-            )", ()).await?;
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            uuid TEXT UNIQUE NOT NULL,
+                            serial_number TEXT UNIQUE NOT NULL,
+                            device_name TEXT,
+                            device_owner TEXT,
+                            email TEXT UNIQUE NOT NULL,
+                            password TEXT,
+                            created_at TEXT NOT NULL
+                        )", ()).await?;
         
-        println!("Initialised sqlite3 database");
+        log::debug!("Initialised sqlite3 database");
         Ok(conn)
     }
 
@@ -47,11 +49,44 @@ impl Database {
     }
 
     pub async fn commit_transaction(tx: Transaction) -> anyhow::Result<()> {
-        println!("Finished commiting transaction");
+        log::debug!("Finished commiting transaction");
         tx.commit().await?;
         
         Ok(())
         // tx finna get dropped here, it aint gunna be here no more
+    }
+
+    pub async fn keyword_exists(
+        conn: &Connection,
+        keyword: WLdbKeyword,
+    ) -> anyhow::Result<bool> {
+        let query = match keyword {
+            WLdbKeyword::SerialNumber(value) => {
+                ("SELECT COUNT(*) FROM users WHERE serial_number = ?", value)
+            }
+            WLdbKeyword::Email(value) => {
+                ("SELECT COUNT(*) FROM users WHERE email = ?", value)
+            }
+            WLdbKeyword::DeviceName(value) => {
+                ("SELECT COUNT(*) FROM users WHERE device_name = ?", value)
+            }
+            WLdbKeyword::DeviceOwner(value) => {
+                ("SELECT COUNT(*) FROM users WHERE device_owner = ?", value)
+            }
+            WLdbKeyword::UUID(value) => {
+                ("SELECT COUNT(*) FROM users WHERE uuid = ?", value)
+            }
+        };
+
+        let mut stmt = conn.prepare(query.0).await?;
+        let mut rows = stmt.query(params![query.1]).await?;
+
+        if let Some(row) = rows.next().await? {
+            let count: i64 = row.get(0)?;
+            return Ok(count > 0);
+        }
+
+        Ok(false)
     }
 }
 
@@ -62,25 +97,31 @@ impl Register {
     /// 
     /// Sample usage:
     /// ```
-    /// if let Err(e) = Register::insert_serial_and_email(&tx, &uuid, serial_number, email).await {
+    /// if let Err(e) = Register::insert_serial_and_email(&tx, serial_number, email).await {
     ///     tx.rollback().await?;
     ///     return Err(e);
     /// }
     /// ```
+    /// Return value: ```anyhow::Result<String>```
     pub async fn insert_serial_and_email(
         tx: &libsql::Transaction,
-        uuid: &str,
         serial_number: &str,
         email: &str,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<String> {
         if serial_number.len() > 12 {
             return Err(anyhow::anyhow!("Serial number must be at most 12 characters long"));
         }
 
-        tx.execute("INSERT INTO users (uuid, serial_number, email) VALUES (?, ?, ?)",
-            params![uuid, serial_number, email]).await?;
+        let uuid = uuid::Uuid::new_v4();
+        let uuid_string = uuid.clone().to_string();
 
-        Ok(())
+        let created_at: DateTime<Utc> = Utc::now();
+        let created_at_str = created_at.to_rfc3339();
+
+        tx.execute("INSERT INTO users (uuid, serial_number, email, created_at) VALUES (?, ?, ?, ?)",
+            params![uuid_string, serial_number, email, created_at_str]).await?;
+
+        Ok(uuid.to_string())
     }
 
     /// step 2, inserts username and password
@@ -123,4 +164,12 @@ impl Register {
 
         Ok(())
     }
+}
+
+pub enum WLdbKeyword {
+    SerialNumber(String),
+    Email(String),
+    DeviceName(String),
+    DeviceOwner(String),
+    UUID(String),
 }
