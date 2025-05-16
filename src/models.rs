@@ -13,3 +13,8 @@ pub struct WLRegister {
     pub device_name: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct DeviceRequest {
+    pub serial_number: String,
+}
+

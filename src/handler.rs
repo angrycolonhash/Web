@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use libsql::{Connection, Transaction};
+use libsql::{params, Connection, Transaction};
 use warp::{http::StatusCode, reply::{json, with_status, Reply}};
 
-use crate::{database::{Database, Register, WLdbKeyword}, models::WLRegister, response::GenericResponse, WebResult};
+use crate::{database::{Database, Register, WLdbKeyword}, models::{DeviceRequest, WLRegister}, response::{GenericResponse, WLDeviceResponse}, WebResult};
 
 pub async fn health_checker_handler() -> WebResult<impl Reply> {
     const MESSAGE: &str = "WinkLink Simple API";
@@ -111,4 +111,83 @@ pub async fn register_handler(body: WLRegister, conn: Arc<libsql::Connection>) -
     };
 
     Ok(with_status(json(&json_response), StatusCode::CREATED))
+}
+
+pub async fn device_lookup_handler(body: DeviceRequest, conn: Arc<libsql::Connection>) -> WebResult<impl Reply> {
+    if let Ok(val) = Database::keyword_exists(&conn, WLdbKeyword::SerialNumber(body.serial_number.clone())).await {
+        if !val {
+            let error_response = GenericResponse {
+                status: "fail".to_string(),
+                message: "Device with this serial number not found".to_string(),
+            };
+            return Ok(with_status(json(&error_response), StatusCode::NOT_FOUND));
+        }
+    } else {
+        // Error checking if serial number exists
+        let error_response = GenericResponse {
+            status: "error".to_string(),
+            message: "Failed to query database".to_string(),
+        };
+        return Ok(with_status(json(&error_response), StatusCode::INTERNAL_SERVER_ERROR));
+    }
+
+    // Query for device details
+    let mut stmt = match conn.prepare("SELECT device_owner, device_name FROM users WHERE serial_number = ?").await {
+        Ok(stmt) => stmt,
+        Err(_) => {
+            let error_response = GenericResponse {
+                status: "error".to_string(),
+                message: "Failed to prepare database query".to_string(),
+            };
+            return Ok(with_status(json(&error_response), StatusCode::INTERNAL_SERVER_ERROR));
+        }
+    };
+    let mut rows = match stmt.query(params![body.serial_number]).await {
+        Ok(rows) => rows,
+        Err(_) => {
+            let error_response = GenericResponse {
+                status: "error".to_string(),
+                message: "Database query failed".to_string(),
+            };
+            return Ok(with_status(json(&error_response), StatusCode::INTERNAL_SERVER_ERROR));
+        }
+    };
+
+    // Try to get the first row
+    match rows.next().await {
+        Ok(Some(row)) => {
+            // Extract the values from the row
+            let device_owner: String = match row.get(0) {
+                Ok(value) => value,
+                Err(_) => String::new(), // Default value if null
+            };
+            
+            let device_name: String = match row.get(1) {
+                Ok(value) => value,
+                Err(_) => String::new(), // Default value if null
+            };
+            
+            let response = WLDeviceResponse {
+                device_owner,
+                device_name,
+            };
+            
+            Ok(with_status(json(&response), StatusCode::OK))
+        },
+        Ok(None) => {
+            // This shouldn't happen since we checked existence above, but just in case
+            let error_response = GenericResponse {
+                status: "fail".to_string(),
+                message: "Device not found".to_string(),
+            };
+            Ok(with_status(json(&error_response), StatusCode::NOT_FOUND))
+        },
+        Err(_) => {
+            let error_response = GenericResponse {
+                status: "error".to_string(),
+                message: "Failed to retrieve device data".to_string(),
+            };
+            Ok(with_status(json(&error_response), StatusCode::INTERNAL_SERVER_ERROR))
+        }
+    }
 }

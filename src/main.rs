@@ -3,6 +3,7 @@ use std::sync::Arc;
 use libsql::Connection;
 use warp::{http::Method, Filter, Rejection};
 use crate::database::Database;
+use crate::models::DeviceRequest;
 
 mod database;
 mod handler;
@@ -29,6 +30,12 @@ async fn main() -> anyhow::Result<()> {
         .and(with_db(conn.clone())) // Pass the database connection as a reference
         .and_then(handler::register_handler);
 
+    let device_lookup_routes = warp::path!("api" / "device")
+        .and(warp::post()) // Handle POST requests
+        .and(warp::body::json::<DeviceRequest>()) // Parse the request body as JSON
+        .and(with_db(conn.clone())) // Pass the database connection as a reference
+        .and_then(handler::device_lookup_handler);
+
     // Configure CORS
     let cors = warp::cors()
         .allow_methods(&[Method::GET, Method::POST])
@@ -39,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
     // Combine all routes
     let routes = register_routes
         .or(health_checker)
+        .or(device_lookup_routes)
         .with(cors)
         .with(warp::log("api"));
 
