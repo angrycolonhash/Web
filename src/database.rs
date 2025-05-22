@@ -16,6 +16,7 @@
 //! ```
 //! 
 
+use argon2::{password_hash::{rand_core::OsRng, SaltString}, Argon2, PasswordHasher};
 use chrono::{DateTime, Utc};
 use libsql::{params, Builder, Connection, Transaction};
 
@@ -24,7 +25,7 @@ pub struct Database;
 impl Database {
     pub async fn init_db() -> anyhow::Result<Connection> {
         // TODO: make this more secure like come on man what the shit?!?
-        let db = Builder::new_local("winklink.db").build().await?;  // this is just for testing probably going to switch to some other connection type
+        let db = Builder::new_local("winklink.db").build().await?;
         let conn = db.connect()?;
 
         conn.execute("CREATE TABLE IF NOT EXISTS users (
@@ -32,9 +33,9 @@ impl Database {
                             uuid TEXT UNIQUE NOT NULL,
                             serial_number TEXT UNIQUE NOT NULL,
                             device_name TEXT,
-                            device_owner TEXT,
+                            device_owner TEXT,  -- This is your username field
                             email TEXT UNIQUE NOT NULL,
-                            password TEXT,
+                            password_hash TEXT,  -- Renamed from password to password_hash for clarity
                             created_at TEXT NOT NULL
                         )", ()).await?;
         
@@ -139,11 +140,17 @@ impl Register {
         username: &str,
         password: &str,
     ) -> anyhow::Result<()> {
-        tx.execute("UPDATE users SET device_owner = ?, password = ? WHERE uuid = ?",
-            params![username, password, uuid]).await?;
+        // Hash the password before storing it
+        let password_hash = Self::hash_password(password)
+            .map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?;
+            
+        // Update the database with the hashed password
+        tx.execute("UPDATE users SET device_owner = ?, password_hash = ? WHERE uuid = ?",
+            params![username, password_hash, uuid]).await?;
 
         Ok(())
     }
+    
 
     /// step 3, inserts device name
     ///
@@ -163,6 +170,17 @@ impl Register {
             params![device_name, uuid]).await?;
 
         Ok(())
+    }
+
+    fn hash_password(password: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        
+        let password_hash = argon2.hash_password(password.as_bytes(), &salt)
+            .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?
+            .to_string();
+        
+        Ok(password_hash)
     }
 }
 
