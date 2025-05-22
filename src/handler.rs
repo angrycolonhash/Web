@@ -1,10 +1,25 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::{SystemTime, UNIX_EPOCH}};
 
-use chrono::{DateTime, Utc};
+use argon2::{password_hash::Salt, Argon2, Params, PasswordHash, PasswordVerifier};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use libsql::{params, Connection, Transaction};
+use serde::{Deserialize, Serialize};
 use warp::{http::StatusCode, reply::{json, with_status, Reply}};
 
-use crate::{database::{Database, Register, WLdbKeyword}, models::{DeviceRequest, WLRegister}, response::{GenericResponse, WLDeviceResponse}, WebResult};
+use crate::{database::{Database, Register, WLdbKeyword}, models::{DeviceRequest, LoginRequest, WLRegister}, response::{GenericResponse, LoginResponse, WLDeviceResponse}, WebResult};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,   // Subject (user ID)
+    exp: usize,    // Expiration time
+    iat: usize,    // Issued at
+}
+
+#[derive(Debug)]
+struct ServerError;
+
+impl warp::reject::Reject for ServerError {}
 
 pub async fn health_checker_handler() -> WebResult<impl Reply> {
     const MESSAGE: &str = "WinkLink Simple API";
@@ -190,4 +205,132 @@ pub async fn device_lookup_handler(body: DeviceRequest, conn: Arc<libsql::Connec
             Ok(with_status(json(&error_response), StatusCode::INTERNAL_SERVER_ERROR))
         }
     }
+}
+
+pub async fn login_handler(
+    login_req: LoginRequest,
+    db: Arc<Connection>
+) -> WebResult<impl Reply> {
+    // Query the database for the user with the provided email
+    let mut rows = match db.query(
+        "SELECT id, password FROM users WHERE email = ?",
+        libsql::params![login_req.email]
+    ).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Database query error: {}", e);
+            return Ok(with_status(
+                json(&GenericResponse {
+                    status: "error".to_string(),
+                    message: "Error querying the database".to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+    
+    let row = match rows.next().await {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            // User does not exist
+            return Ok(with_status(
+                json(&GenericResponse {
+                    status: "fail".to_string(),
+                    message: "Invalid email or password".to_string(),
+                }),
+                StatusCode::UNAUTHORIZED,
+            ));
+        }
+        Err(e) => {
+            eprintln!("Failed to retrieve row: {}", e);
+            return Ok(with_status(
+                json(&GenericResponse {
+                    status: "error".to_string(),
+                    message: "Error retrieving user data".to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+    
+    let user_id: String = match row.get(0) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("Failed to get user_id: {}", e);
+            return Ok(with_status(
+                json(&GenericResponse {
+                    status: "error".to_string(),
+                    message: "Error processing user data".to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+    let password_hash: String = match row.get(1) {
+        Ok(hash) => hash,
+        Err(e) => {
+            eprintln!("Failed to get password_hash: {}", e);
+            return Ok(with_status(
+                json(&GenericResponse {
+                    status: "error".to_string(),
+                    message: "Error processing user data".to_string(),
+                }),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ));
+        }
+    };
+
+    let password_matches = match PasswordHash::new(&password_hash) {
+        Ok(parsed_hash) => {
+            Argon2::default()
+                .verify_password(login_req.password.as_bytes(), &parsed_hash)
+                .is_ok()
+        }
+        Err(e) => {
+            eprintln!("Failed to parse password hash: {}", e);
+            // Treat hash parsing errors as a security precaution, similar to a password mismatch
+            false 
+        }
+    };
+
+    if !password_matches {
+        return Ok(with_status(
+            json(&GenericResponse {
+                status: "fail".to_string(),
+                message: "Invalid email or password".to_string(),
+            }),
+            StatusCode::UNAUTHORIZED,
+        ));
+    }
+    
+    // Generate JWT token
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs() as usize;
+    
+    let claims = Claims {
+        sub: user_id.clone(),
+        exp: now + 60 * 60 * 24, // 24 hours expiration
+        iat: now,
+    };
+
+    let secret = "my_super_secret_key";
+    
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .map_err(|_| warp::reject::custom(ServerError))?;
+    
+    Ok(warp::reply::with_status(
+        warp::reply::json(&LoginResponse {
+            status: "success".to_string(),
+            message: "Login successful".to_string(),
+            token,
+            user_id,
+        }),
+        StatusCode::OK,
+    ))
 }

@@ -30,6 +30,12 @@ async fn main() -> anyhow::Result<()> {
         .and(with_db(conn.clone())) // Pass the database connection as a reference
         .and_then(handler::register_handler);
 
+    let login_routes = warp::path!("api" / "login")
+        .and(warp::post())
+        .and(warp::body::json()) // Parse the request body as JSON
+        .and(with_db(conn.clone())) // Pass the database connection
+        .and_then(handler::login_handler);
+
     let device_lookup_routes = warp::path!("api" / "device")
         .and(warp::post()) // Handle POST requests
         .and(warp::body::json::<DeviceRequest>()) // Parse the request body as JSON
@@ -47,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let routes = register_routes
         .or(health_checker)
         .or(device_lookup_routes)
+        .or(login_routes)
         .with(cors)
         .with(warp::log("api"));
 

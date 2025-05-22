@@ -18,3 +18,8 @@ pub struct DeviceRequest {
     pub serial_number: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}

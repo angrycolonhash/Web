@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Winklink Auth</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div id="login-view">
+            <h2>Login</h2>
+            <form id="login-form">
+                <div>
+                    <label for="login-email">Email:</label>
+                    <input type="email" id="login-email" name="email" required>
+                </div>
+                <div>
+                    <label for="login-password">Password:</label>
+                    <input type="password" id="login-password" name="password" required>
+                </div>
+                <button type="submit">Login</button>
+            </form>
+            <p>Don't have an account? <a href="#" id="show-register">Register here</a></p>
+        </div>
+
+        <div id="register-view" style="display: none;">
+            <h2>Register</h2>
+            <form id="register-form">
+                <!-- Step 1: Serial Number -->
+                <div class="form-step" id="step-1">
+                    <h3>Step 1: Device Serial Number</h3>
+                    <div>
+                        <label for="serial-number">Serial Number:</label>
+                        <input type="text" id="serial-number" name="serial_number" required>
+                    </div>
+                    <button type="button" class="next-step">Next</button>
+                </div>
+
+                <!-- Step 2: Email -->
+                <div class="form-step" id="step-2" style="display: none;">
+                    <h3>Step 2: Email</h3>
+                    <div>
+                        <label for="register-email">Email:</label>
+                        <input type="email" id="register-email" name="email" required>
+                    </div>
+                    <button type="button" class="prev-step">Previous</button>
+                    <button type="button" class="next-step">Next</button>
+                </div>
+
+                <!-- Step 3: Username and Password -->
+                <div class="form-step" id="step-3" style="display: none;">
+                    <h3>Step 3: Account Details</h3>
+                    <div>
+                        <label for="register-username">Username:</label>
+                        <input type="text" id="register-username" name="username" required>
+                    </div>
+                    <div>
+                        <label for="register-password">Password:</label>
+                        <input type="password" id="register-password" name="password" required>
+                    </div>
+                    <button type="button" class="prev-step">Previous</button>
+                    <button type="button" class="next-step">Next</button>
+                </div>
+
+                <!-- Step 4: Device Name -->
+                <div class="form-step" id="step-4" style="display: none;">
+                    <h3>Step 4: Device Name</h3>
+                    <div>
+                        <label for="device-name">Device Name:</label>
+                        <input type="text" id="device-name" name="device_name" required>
+                    </div>
+                    <button type="button" class="prev-step">Previous</button>
+                    <button type="submit">Register</button>
+                </div>
+            </form>
+            <p>Already have an account? <a href="#" id="show-login">Login here</a></p>
+        </div>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
